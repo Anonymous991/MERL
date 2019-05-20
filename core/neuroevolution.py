@@ -34,6 +34,7 @@ class SSNE:
 
 		#Lineage scores
 		self.lineage = [[] for _ in range(self.popn_size)]
+		self.all_offs = []
 
 
 
