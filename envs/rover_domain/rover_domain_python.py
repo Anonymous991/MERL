@@ -11,8 +11,6 @@ class RoverDomainVel:
 	def __init__(self, args):
 
 		self.args = args
-		self.task_type = args.env_choice
-		self.harvest_period = args.harvest_period
 
 		#Gym compatible attributes
 		self.observation_space = np.zeros((1, int(2*360 / self.args.angle_res)+1))
@@ -23,8 +21,8 @@ class RoverDomainVel:
 
 		# Initialize POI containers tha track POI position and status
 		self.poi_pos = [[None, None] for _ in range(self.args.num_poi)]  # FORMAT: [poi_id][x, y] coordinate
-		self.poi_status = [self.harvest_period for _ in range(self.args.num_poi)]  # FORMAT: [poi_id][status] --> [harvest_period --> 0 (observed)] is observed?
-		#self.poi_value = [float(i+1) for i in range(self.args.num_poi)]  # FORMAT: [poi_id][value]?
+		self.poi_status = [1 for _ in range(self.args.num_poi)]  # FORMAT: [poi_id][status] --> [harvest_period --> 0 (observed)] is observed?
+
 		self.poi_value = [1.0 for _ in range(self.args.num_poi)]
 		self.poi_visitor_list = [[] for _ in range(self.args.num_poi)]  # FORMAT: [poi_id][visitors]?
 
@@ -47,13 +45,12 @@ class RoverDomainVel:
 		self.reset_poi_pos()
 		self.reset_rover_pos()
 		self.rover_vel = [[0.0, 0.0] for _ in range(self.args.num_agents)]
-		#self.poi_value = [float(i+1) for i in range(self.args.num_poi)]
 		self.poi_value = [1.0 for _ in range(self.args.num_poi)]
 
 		self.rover_closest_poi = [self.args.dim_x*2 for _ in range(self.args.num_agents)]
 		self.cumulative_local = [0 for _ in range(self.args.num_agents)]
 
-		self.poi_status = [self.harvest_period for _ in range(self.args.num_poi)]
+		self.poi_status = [1 for _ in range(self.args.num_poi)]
 		self.poi_visitor_list = [[] for _ in range(self.args.num_poi)]  # FORMAT: [poi_id][visitors]?
 		self.rover_path = [[] for _ in range(self.args.num_agents)]
 		self.action_seq = [[] for _ in range(self.args.num_agents)]
@@ -89,12 +86,10 @@ class RoverDomainVel:
 			elif self.rover_vel[rover_id][1] > 0.5: self.rover_vel[rover_id][0] = 0.5
 
 
-
-
 			theta = self.rover_vel[rover_id][1] * 180 + self.rover_pos[rover_id][2]
 			if theta > 360: theta -= 360
 			elif theta < 0: theta += 360
-			#self.rover_pos[rover_id][2] = theta
+
 
 			#Update position
 			x = self.rover_vel[rover_id][0] * math.cos(math.radians(theta))
@@ -195,7 +190,7 @@ class RoverDomainVel:
 				try: bracket = int(angle / self.args.angle_res)
 				except: bracket = 0
 				if bracket >= len(temp_poi_dist_list):
-					print("ERROR: BRACKET EXCEED LIST", bracket, len(temp_poi_dist_list))
+					#print("ERROR: BRACKET EXCEED LIST", bracket, len(temp_poi_dist_list))
 					bracket = len(temp_poi_dist_list)-1
 				if dist == 0: dist = 0.001
 				temp_poi_dist_list[bracket].append((value/(dist*dist)))
@@ -217,7 +212,6 @@ class RoverDomainVel:
 				try: bracket = int(angle / self.args.angle_res)
 				except: bracket = 0
 				if bracket >= len(temp_rover_dist_list):
-					print("ERROR: BRACKET EXCEED LIST", bracket, len(temp_rover_dist_list), angle)
 					bracket = len(temp_rover_dist_list)-1
 				temp_rover_dist_list[bracket].append((1/(dist*dist)))
 
@@ -269,7 +263,6 @@ class RoverDomainVel:
 
 		return angle, dist
 
-
 	def get_local_reward(self):
 		#Update POI's visibility
 		poi_visitors = [[] for _ in range(self.args.num_poi)]
@@ -288,9 +281,8 @@ class RoverDomainVel:
 		#Compute reward
 		rewards = [0.0 for _ in range(self.args.num_agents)]
 		for poi_id, rovers in enumerate(poi_visitors):
-				#if self.task_type == 'rover_tight' and len(rovers) >= self.args.coupling or self.task_type == 'rover_loose' and len(rovers) >= 1:
 				#Update POI status
-				if self.task_type == 'rover_tight' and len(rovers) >= self.args.coupling or self.task_type == 'rover_loose' and len(rovers) >= 1 or self.task_type == 'rover_trap' and len(rovers) >= 1:
+				if len(rovers) >= self.args.coupling:
 					self.poi_status[poi_id] -= 1
 					self.poi_visitor_list[poi_id] = list(set(self.poi_visitor_list[poi_id]+rovers[:]))
 
@@ -304,7 +296,6 @@ class RoverDomainVel:
 				proxim_rew = self.args.act_dist/self.rover_closest_poi[i]
 				if proxim_rew > 1.0: proxim_rew = 1.0
 				rewards[i] += proxim_rew
-				#print(self.rover_closest_poi[i], proxim_rew)
 				self.cumulative_local[i] += proxim_rew
 		self.rover_closest_poi = [self.args.dim_x * 2 for _ in range(self.args.num_agents)] #Reset closest POI
 
@@ -321,21 +312,9 @@ class RoverDomainVel:
 
 	def get_global_reward(self):
 		global_rew = 0.0; max_reward = 0.0
-
-		if self.task_type == 'rover_tight' or self.task_type == 'rover_loose':
-			for value, status in zip(self.poi_value, self.poi_status):
-				global_rew += (status == 0) * value
-				max_reward += value
-
-		elif self.task_type == 'rover_trap':  # Rover_Trap domain
-			for value, visitors in zip(self.poi_value, self.poi_visitor_list):
-				multiplier = len(visitors) if len(visitors) < self.args.coupling else self.args.coupling
-				global_rew += value * multiplier
-				max_reward += self.args.coupling * value
-
-		else:
-			sys.exit('Incorrect task type')
-
+		for value, status in zip(self.poi_value, self.poi_status):
+			global_rew += (status == 0) * value
+			max_reward += value
 
 		global_rew = global_rew/max_reward
 
