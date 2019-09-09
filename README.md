@@ -1,4 +1,4 @@
-Anonymized Codebase for Multiagent Evolutionary Reinforcement Learning (MERL) in submission to Neurips 2019
+Anonymized Codebase for Multiagent Evolutionary Reinforcement Learning (MERL)
 
 #################################
           Code labels
@@ -46,17 +46,15 @@ Guide to set up env
     
 
 ################################################################# 
-Guide to run MERL experiments
+Guide to run experiments for Rover
 ################################################################# 
 
-1. MERL --> python train.py -popsize 20 -rollsize 50 -config $DESIRED_CONFIG$ -frames 2 -seed $SEED$
-2. EA --> python train.py -popsize 20 -rollsize 0 -config $DESIRED_CONFIG$ -frames 2 -seed $SEED$
+1. MERL --> python train.py -popsize 10 -rollsize 50 -config $DESIRED_CONFIG$ -frames 2 -seed $SEED$
+2. EA --> python train.py -popsize 10 -rollsize 0 -config $DESIRED_CONFIG$ -frames 2 -seed $SEED$
 3. MADDPG_global --> python train.py -popsize 0 -rollsize 50 -config $DESIRED_CONFIG$ -frames 2 -seed $SEED$ -maddpg 1 -reward global
 4. MADDPG_mixed --> python train.py -popsize 0 -rollsize 50 -config $DESIRED_CONFIG$ -frames 2 -seed $SEED$ -maddpg 1 -reward mixed
 5. MATD3_global --> python train.py -popsize 0 -rollsize 50 -config $DESIRED_CONFIG$ -frames 2 -seed $SEED$ -matd3 1 -reward global
 6. MATD3_mixed --> python train.py -popsize 0 -rollsize 50 -config $DESIRED_CONFIG$ -frames 2 -seed $SEED$ -matd3 1 -reward mixed
-
-
 
 CONFIGS AND SEED USED IN THE PAPER 
 
@@ -65,3 +63,23 @@ DESIRED CONFIGS = {3_1, 4_2, 6_3, 8_4, 10_5, 12_6, 14_7}
 SEED = {2019, 2020, 2021, 2022, 2023} 
 
 
+################################################################# 
+Guide to run experiments for Predator-prey and Cooperative Navigation
+################################################################# 
+Note that the code for predator-prey and cooperative navigation were different branches and are thus copied into a separate folder for simplicity.
+To run predator-prey or cooperative navigation, browse into their respective folders and run the following:
+
+
+1. MERL --> python train.py -popsize 10 -rollsize 10 -config $DESIRED_CONFIG$ -frames N -seed $SEED$
+2. EA --> python train.py -popsize 10 -rollsize 0 -config $DESIRED_CONFIG$ -frames N -seed $SEED$
+3. MADDPG --> python train.py -popsize 0 -rollsize 50 -config $DESIRED_CONFIG$ -frames N -seed $SEED$ -maddpg 1 
+4. MATD3 --> python train.py -popsize 0 -rollsize 50 -config $DESIRED_CONFIG$ -frames N -seed $SEED$ -matd3 1 
+
+
+CONFIGS AND SEED USED IN THE PAPER 
+
+N = 10 for simple_spread and 2 for simple_tag and hard_tag
+
+DESIRED CONFIGS = {simple_spread, simple_tag, hard_tag} representing cooperative navigation, easy predator-prey and hard predator-prey, respectively. 
+
+SEED = {2018, 2019, 2020, 2021, 2022} 
