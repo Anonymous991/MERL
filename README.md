@@ -22,7 +22,7 @@ core/off_policy_algo.py: Implements the off_policy_gradient learner TD3/DDPG/MAT
 
 core/mod_utils.py: Helper functions
 
-envs/rover_domain: ROver Domain Environment files
+envs/rover_domain: Rover Domain Environment files
 
 
 ################################################################# 
