@@ -37,11 +37,11 @@ class Agent:
         self.popn = self.manager.list()
         for _ in range(args.popn_size):
             if args.ps == 'trunk':
-                self.popn.append(MultiHeadActor(args.state_dim, args.action_dim, args.hidden_size, args.config.num_agents))
+                self.popn.append(MultiHeadActor(args.pred_state_dim, args.action_dim, args.hidden_size, args.config.num_agents))
 
             else:
-                if args.algo_name == 'TD3': self.popn.append(Actor(args.state_dim, args.action_dim, args.hidden_size, policy_type='DeterministicPolicy'))
-                else: self.popn.append(Actor(args.state_dim, args.action_dim, args.hidden_size, policy_type='GaussianPolicy'))
+                if args.algo_name == 'TD3': self.popn.append(Actor(args.pred_state_dim, args.action_dim, args.hidden_size, policy_type='DeterministicPolicy'))
+                else: self.popn.append(Actor(args.pred_state_dim, args.action_dim, args.hidden_size, policy_type='GaussianPolicy'))
             self.popn[-1].eval()
 
         #### INITIALIZE PG ALGO #####
@@ -49,30 +49,27 @@ class Agent:
 
             if self.args.is_matd3 or args.is_maddpg:
                 algo_name = 'TD3' if self.args.is_matd3 else 'DDPG'
-                self.algo = MATD3(id, algo_name, args.state_dim, args.action_dim, args.hidden_size, args.actor_lr,
+                self.algo = MATD3(id, algo_name, args.pred_state_dim, args.action_dim, args.hidden_size, args.actor_lr,
                                 args.critic_lr, args.gamma, args.tau, args.savetag, args.aux_save, args.actualize,
                                 args.use_gpu, args.config.num_agents, args.init_w)
 
             else:
-                self.algo = MultiTD3(id, args.algo_name, args.state_dim, args.action_dim, args.hidden_size, args.actor_lr,
+                self.algo = MultiTD3(id, args.algo_name, args.pred_state_dim, args.action_dim, args.hidden_size, args.actor_lr,
                                 args.critic_lr, args.gamma, args.tau, args.savetag, args.aux_save, args.actualize,
                                 args.use_gpu, args.config.num_agents, args.init_w)
 
 
         else:
-            if args.algo_name == 'TD3':
-                self.algo = TD3(id, args.algo_name, args.state_dim, args.action_dim, args.hidden_size, args.actor_lr, args.critic_lr, args.gamma, args.tau, args.savetag, args.aux_save, args.actualize, args.use_gpu, args.init_w)
-            else:
-                self.algo = SAC(id, args.state_dim, args.action_dim, args.hidden_size, args.gamma, args.critic_lr, args.actor_lr, args.tau, args.alpha, args.target_update_interval, args.savetag, args.aux_save, args.actualize, args.use_gpu)
+            self.algo = TD3(id, args.algo_name, args.pred_state_dim, args.action_dim, args.hidden_size, args.actor_lr, args.critic_lr, args.gamma, args.tau, args.savetag, args.aux_save, args.actualize, args.use_gpu, args.init_w)
 
         #### Rollout Actor is a template used for MP #####
         self.rollout_actor = self.manager.list()
 
         if args.ps == 'trunk':
-            self.rollout_actor.append(MultiHeadActor(args.state_dim, args.action_dim, args.hidden_size, args.config.num_agents))
+            self.rollout_actor.append(MultiHeadActor(args.pred_state_dim, args.action_dim, args.hidden_size, args.config.num_agents))
         else:
-            if args.algo_name == 'TD3': self.rollout_actor.append(Actor(args.state_dim, args.action_dim, args.hidden_size, policy_type='DeterministicPolicy'))
-            else: self.rollout_actor.append(Actor(args.state_dim, args.action_dim, args.hidden_size, policy_type='GaussianPolicy'))
+            if args.algo_name == 'TD3': self.rollout_actor.append(Actor(args.pred_state_dim, args.action_dim, args.hidden_size, policy_type='DeterministicPolicy'))
+            else: self.rollout_actor.append(Actor(args.pred_state_dim, args.action_dim, args.hidden_size, policy_type='GaussianPolicy'))
 
         #Initalize buffer
         self.buffer = [Buffer(args.buffer_size, buffer_gpu=False, filter_c=args.filter_c) for _ in range(args.config.num_agents)]
@@ -104,13 +101,13 @@ class Agent:
                 buffer.tensorify()
 
                 for _ in range(int(self.args.gradperstep * buffer.pg_frames)):
-                    s, ns, a, r, done, global_reward = buffer.sample(self.args.batch_size,
+                    s, ns, a, r, done = buffer.sample(self.args.batch_size,
                                                                           pr_rew=self.args.priority_rate,
                                                                           pr_global=self.args.priority_rate)
                     r*=self.args.reward_scaling
                     if self.args.use_gpu:
-                        s = s.cuda(); ns = ns.cuda(); a = a.cuda(); r = r.cuda(); done = done.cuda(); global_reward = global_reward.cuda()
-                    self.algo.update_parameters(s, ns, a, r, done, global_reward, agent_id, 1, **td3args)
+                        s = s.cuda(); ns = ns.cuda(); a = a.cuda(); r = r.cuda(); done = done.cuda()
+                    self.algo.update_parameters(s, ns, a, r, done, agent_id, 1, **td3args)
                 buffer.pg_frames = 0
 
         else:
@@ -119,11 +116,11 @@ class Agent:
             self.buffer.tensorify()
 
             for _ in range(int(self.args.gradperstep * self.buffer.pg_frames)):
-                s, ns, a, r, done, global_reward = self.buffer.sample(self.args.batch_size, pr_rew=self.args.priority_rate, pr_global=self.args.priority_rate)
+                s, ns, a, r, done = self.buffer.sample(self.args.batch_size, pr_rew=self.args.priority_rate, pr_global=self.args.priority_rate)
                 r *= self.args.reward_scaling
                 if self.args.use_gpu:
-                    s = s.cuda(); ns = ns.cuda(); a = a.cuda(); r = r.cuda(); done = done.cuda(); global_reward = global_reward.cuda()
-                self.algo.update_parameters(s, ns, a, r, done, global_reward, 1, **td3args)
+                    s = s.cuda(); ns = ns.cuda(); a = a.cuda(); r = r.cuda(); done = done.cuda()
+                self.algo.update_parameters(s, ns, a, r, done, 1, **td3args)
 
             self.buffer.pg_frames = 0 #Reset new frame counter to 0
 
@@ -197,11 +194,11 @@ class PreyAgent:
         self.manager = Manager()
 
         #### INITIALIZE PG ALGO #####
-        self.algo = MultiTD3(id, 'DDPG', 14, 2, args.hidden_size, args.actor_lr,
+        self.algo = MultiTD3(id, 'DDPG', args.prey_state_dim, args.action_dim, args.hidden_size, args.actor_lr,
                                 args.critic_lr, args.gamma, args.tau, args.savetag, args.aux_save, args.actualize,
                                 args.use_gpu, 1, args.init_w)
         self.rollout_actor = self.manager.list()
-        self.rollout_actor.append(MultiHeadActor(14, 2, args.hidden_size, 1))
+        self.rollout_actor.append(MultiHeadActor(args.prey_state_dim, args.action_dim, args.hidden_size, 1))
 
 
         #Initalize buffer
@@ -223,13 +220,13 @@ class PreyAgent:
                 buffer.tensorify()
 
                 for _ in range(int(self.args.gradperstep * buffer.pg_frames)):
-                    s, ns, a, r, done, global_reward = buffer.sample(self.args.batch_size,
+                    s, ns, a, r, done = buffer.sample(self.args.batch_size,
                                                                           pr_rew=self.args.priority_rate,
                                                                           pr_global=self.args.priority_rate)
                     r*=self.args.reward_scaling
                     if self.args.use_gpu:
-                        s = s.cuda(); ns = ns.cuda(); a = a.cuda(); r = r.cuda(); done = done.cuda(); global_reward = global_reward.cuda()
-                    self.algo.update_parameters(s, ns, a, r, done, global_reward, agent_id, 1, **td3args)
+                        s = s.cuda(); ns = ns.cuda(); a = a.cuda(); r = r.cuda(); done = done.cuda()
+                    self.algo.update_parameters(s, ns, a, r, done, agent_id, 1, **td3args)
                 buffer.pg_frames = 0
 
 
@@ -279,8 +276,8 @@ class TestAgent:
         self.predator = self.manager.list()
         self.prey = self.manager.list()
 
-        self.predator.append(MultiHeadActor(args.state_dim, args.action_dim, args.hidden_size, args.config.num_agents))
-        self.prey.append(MultiHeadActor(14, 2, args.hidden_size, 1))
+        self.predator.append(MultiHeadActor(args.pred_state_dim, args.action_dim, args.hidden_size, args.config.num_agents))
+        self.prey.append(MultiHeadActor(args.prey_state_dim, args.action_dim, args.hidden_size, 1))
 
 
 

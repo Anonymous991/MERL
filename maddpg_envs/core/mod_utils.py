@@ -15,7 +15,7 @@ class Tracker(): #Tracker
         None
     """
 
-    def __init__(self, save_folder, vars_string, project_string, save_iteration=1, conv_size=1):
+    def __init__(self, save_folder, vars_string, project_string, save_iteration=10, conv_size=1):
         self.vars_string = vars_string; self.project_string = project_string
         self.foldername = save_folder
         self.all_tracker = [[[],0.0,[]] for _ in vars_string] #[Id of var tracked][fitnesses, avg_fitness, csv_fitnesses]

@@ -15,10 +15,7 @@ class Buffer():
 		self.capacity = capacity; self.buffer_gpu = buffer_gpu; self.filter_c = filter_c
 		self.manager = Manager()
 		self.tuples = self.manager.list() #Temporary shared buffer to get experiences from processes
-		self.s = []; self.ns = []; self.a = []; self.r = []; self.done = []; self.global_reward = []
-
-		# Temporary tensors that cane be loaded in GPU for fast sampling during gradient updates (updated each gen) --> Faster sampling - no need to cycle experiences in and out of gpu 1000 times
-		self.sT = None; self.nsT = None; self.aT = None; self.rT = None; self.doneT = None; self.global_rewardT = None
+		self.s = []; self.ns = []; self.a = []; self.r = []; self.done = []
 
 		self.pg_frames = 0; self.total_frames = 0
 
@@ -34,25 +31,12 @@ class Buffer():
 
 	def data_filter(self, exp):
 
-		# # #Initialize to not save
-		# save_data = False
-		# #
-		# if self.gstats['mean'] == None or exp[6] == 'pg': save_data=True #save automatically if [gstats is unknown] or Policy Gradient
-		#
-		# elif self.filter_c == -1: save_data=True
-		#
-		# else:
-		# 	prob_mass = (exp[5] - self.gstats['min']) / (self.gstats['max']-self.gstats['min']) #Normalization
-		# 	prob = prob_mass.item() * self.filter_c #Coefficient
-		# 	if random.random() < prob: save_data = True
-		#
 		# if save_data:
 		self.s.append(exp[0])
 		self.ns.append(exp[1])
 		self.a.append(exp[2])
 		self.r.append(exp[3])
 		self.done.append(exp[4])
-		self.global_reward.append(exp[5])
 		self.pg_frames += 1
 		self.total_frames += 1
 
@@ -73,7 +57,7 @@ class Buffer():
 
 		#Trim to make the buffer size < capacity
 		while self.__len__() > self.capacity:
-			self.s.pop(0); self.ns.pop(0); self.a.pop(0); self.r.pop(0); self.done.pop(0); self.global_reward.pop(0)
+			self.s.pop(0); self.ns.pop(0); self.a.pop(0); self.r.pop(0); self.done.pop(0)
 
 
 	def __len__(self):
@@ -87,7 +71,7 @@ class Buffer():
 				   Experience (tuple): A tuple of (state, next_state, action, shaped_reward, done) each as a numpy array with shape (batch_size, :)
 		   """
 		#Uniform sampling
-		ind = random.sample(range(len(self.sT)), batch_size)
+		ind = random.sample(range(len(self.s)), batch_size)
 
 		if pr_global != 0.0 or pr_rew !=0.0:
 			#Prioritization
@@ -98,8 +82,12 @@ class Buffer():
 			ind = ind[num_r+num_global:] + ind_r + ind_global
 
 
-		return self.sT[ind], self.nsT[ind], self.aT[ind], self.rT[ind], self.doneT[ind], self.global_rewardT[ind]
-		#return np.vstack([self.s[i] for i in ind]), np.vstack([self.ns[i] for i in ind]), np.vstack([self.a[i] for i in ind]), np.vstack([self.r[i] for i in ind]), np.vstack([self.done[i] for i in ind])
+		#return self.sT[ind], self.nsT[ind], self.aT[ind], self.rT[ind], self.doneT[ind], self.global_rewardT[ind]
+		return torch.Tensor(np.vstack([self.s[i] for i in ind])), \
+			   torch.Tensor(np.vstack([self.ns[i] for i in ind])),\
+			   torch.Tensor(np.vstack([self.a[i] for i in ind])),\
+			   torch.Tensor(np.vstack([self.r[i] for i in ind])), \
+			   torch.Tensor(np.vstack([self.done[i] for i in ind]))
 
 
 	def tensorify(self):
@@ -111,27 +99,4 @@ class Buffer():
 		   """
 		self.referesh() #Referesh first
 
-		if self.__len__() >1:
-
-			self.sT = torch.tensor(np.vstack(self.s))
-			self.nsT = torch.tensor(np.vstack(self.ns))
-			self.aT = torch.tensor(np.vstack(self.a))
-			self.rT = torch.tensor(np.vstack(self.r))
-			self.doneT = torch.tensor(np.vstack(self.done))
-			self.global_rewardT = torch.tensor(np.vstack(self.global_reward))
-			if self.buffer_gpu:
-				self.sT = self.sT.cuda()
-				self.nsT = self.nsT.cuda()
-				self.aT = self.aT.cuda()
-				self.rT = self.rT.cuda()
-				self.doneT = self.doneT.cuda()
-				self.global_rewardT = self.global_rewardT.cuda()
-
-			#Prioritized indices update
-			self.top_r = list(np.argsort(np.vstack(self.r), axis=0)[-int(len(self.s)/10):])
-			self.top_g = list(np.argsort(np.vstack(self.global_reward), axis=0)[-int(len(self.s) / 10):])
-
-			#Update Stats
-			compute_stats(self.rT, self.rstats)
-			compute_stats(self.global_rewardT, self.gstats)
 

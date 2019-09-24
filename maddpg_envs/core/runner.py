@@ -3,7 +3,7 @@ import numpy as np, random, sys
 
 
 #Rollout evaluate an agent in a complete game
-def rollout_worker(args, id, type, task_pipe, result_pipe, predator_data_bucket, prey_data_bucket, predators_bucket, prey_bucket, store_transitions, random_baseline):
+def rollout_worker(args, id, type, task_pipe, result_pipe, predator_data_bucket, prey_data_bucket, predators_bucket, prey_bucket, store_transitions, config):
     """Rollout Worker runs a simulation in the environment to generate experiences and fitness values
 
         Parameters:
@@ -27,8 +27,22 @@ def rollout_worker(args, id, type, task_pipe, result_pipe, predator_data_bucket,
     else: sys.exit('Incorrect type')
 
 
-    from envs.env_wrapper import SimpleTag
-    env = SimpleTag(args, NUM_EVALS)
+    if config == 'simple_tag' or config == 'hard_tag':
+        from envs.env_wrapper import SimpleTag
+        env = SimpleTag(args, NUM_EVALS)
+
+    elif config == 'simple_adversary':
+        from envs.env_wrapper import SimpleAdversary
+        env = SimpleAdversary(args, NUM_EVALS)
+
+    elif config == 'simple_push':
+        from envs.env_wrapper import SimplePush
+        env = SimplePush(args, NUM_EVALS)
+    else:
+        sys.exit('Unknow Config in runner.py')
+    print('Runner running config ', config)
+
+
     np.random.seed(id); random.seed(id)
 
     while True:
@@ -37,7 +51,8 @@ def rollout_worker(args, id, type, task_pipe, result_pipe, predator_data_bucket,
         if teams_blueprint == 'TERMINATE': exit(0)  # Kill yourself
 
         # Get the current team actors
-        if type == 'test' or type == 'pg': team = [predators_bucket[0] for _ in range(args.config.num_agents)]
+        if type == 'test' or type == 'pg':
+            team = [predators_bucket[0] for _ in range(args.config.num_agents)]
         elif type == "evo": team = [predators_bucket[teams_blueprint[0]] for _ in range(args.config.num_agents)]
         else: sys.exit('Incorrect type')
 
@@ -45,7 +60,7 @@ def rollout_worker(args, id, type, task_pipe, result_pipe, predator_data_bucket,
 
         fitness = [None for _ in range(NUM_EVALS)]; frame=0
         prey_fitness = [None for _ in range(NUM_EVALS)]
-        prey_state, predator_state = env.reset()
+        predator_state, prey_state = env.reset()
         prey_rollout_trajectory = []
         predator_rollout_trajectory = [[] for _ in range(3)]
 
@@ -54,11 +69,11 @@ def rollout_worker(args, id, type, task_pipe, result_pipe, predator_data_bucket,
 
         while True: #unless done
             if type == 'pg':
-                prey_action = [prey_bucket[0].noisy_action(prey_state[i,:], head=i).detach().numpy() for i in range(1)]
-                predator_action = [team[i].noisy_action(predator_state[i,:], head=i).detach().numpy() for i in range(3)]
+                prey_action = [prey_bucket[0].noisy_action(prey_state[i,:], head=i).detach().numpy() for i in range(len(prey_state))]
+                predator_action = [team[i].noisy_action(predator_state[i,:], head=i).detach().numpy() for i in range(len(predator_state))]
             else:
-                prey_action = [prey_bucket[0].clean_action(prey_state[i, :], head=i).detach().numpy() for i in range(1)]
-                predator_action = [team[i].clean_action(predator_state[i, :], head=i).detach().numpy() for i in range(3)]
+                prey_action = [prey_bucket[0].clean_action(prey_state[i, :], head=i).detach().numpy() for i in range(len(prey_state))]
+                predator_action = [team[i].clean_action(predator_state[i, :], head=i).detach().numpy() for i in range(len(predator_state))]
 
             #JOINT ACTION [agent_id, universe_id, action]
 
@@ -150,17 +165,6 @@ def rollout_worker(args, id, type, task_pipe, result_pipe, predator_data_bucket,
 
                 break
 
-        #print(fitness)
-
-        #Vizualization for test sets
-       # if type == "test" and (args.config.env_choice == 'rover_tight' or args.config.env_choice == 'rover_loose' or args.config.env_choice == 'motivate'or args.config.env_choice == 'rover_trap'or args.config.config == 'simple_spread'):
-            #env.render()
-            #viz_gen += 5
-            #print('Test trajectory lens',[len(world.rover_path[0]) for world in env.universe])
-            #print (type, id, 'Fit of rendered', ['%.2f'%f for f in fitness])
-            # if random.random() < 0.1:
-            # 	best_performant = fitness.index(max(fitness))
-            # 	env.universe[best_performant].viz(save=True, fname=args.aux_save+str(viz_gen)+'_'+args.savetag)
 
 
         #Send back id, fitness, total length and shaped fitness using the result pipe

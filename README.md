@@ -64,9 +64,9 @@ SEED = {2019, 2020, 2021, 2022, 2023}
 
 
 ################################################################# 
-Guide to run experiments for Predator-prey and Cooperative Navigation
+Guide to run experiments for Predator-prey, Keep-away and Physical Deception
 ################################################################# 
-Note that the code for predator-prey and cooperative navigation were different branches and are thus copied into a separate folder for simplicity.
+Note that the code for the adversarial domains were a different branch and are thus copied into a separate folder for simplicity.
 To run predator-prey or cooperative navigation, browse into their respective folders and run the following:
 
 
@@ -78,8 +78,6 @@ To run predator-prey or cooperative navigation, browse into their respective fol
 
 CONFIGS AND SEED USED IN THE PAPER 
 
-N = 10 for simple_spread and 2 for simple_tag and hard_tag
-
-DESIRED CONFIGS = {simple_spread, simple_tag, hard_tag} representing cooperative navigation, easy predator-prey and hard predator-prey, respectively. 
+DESIRED CONFIGS = {simple_tag, hard_tag, simple_push and simple_adversary} representing easy predator-prey, hard predator-prey, keep-away and physical deception respectively. 
 
 SEED = {2018, 2019, 2020, 2021, 2022} 
