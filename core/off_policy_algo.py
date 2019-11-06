@@ -22,21 +22,29 @@ class MultiTD3(object):
 		self.policy = MultiHeadActor(state_dim, action_dim, hidden_size, num_agents)
 		if init_w: self.policy.apply(utils.init_weights)
 		self.policy_target = MultiHeadActor(state_dim, action_dim, hidden_size, num_agents)
+		if use_gpu:
+			self.policy.cuda()
+			self.policy_target.cuda()
 		utils.hard_update(self.policy_target, self.policy)
 		self.policy_optim = Adam(self.policy.parameters(), actor_lr)
 
 
-		self.critic = QNetwork(state_dim, action_dim,hidden_size)
-		if init_w: self.critic.apply(utils.init_weights)
-		self.critic_target = QNetwork(state_dim, action_dim, hidden_size)
-		utils.hard_update(self.critic_target, self.critic)
-		self.critic_optim = Adam(self.critic.parameters(), critic_lr)
+		self.critics = [QNetwork(state_dim, action_dim, hidden_size) for _ in range(num_agents)]
+
+		self.critics_target = [QNetwork(state_dim, action_dim, hidden_size) for _ in range(num_agents)]
+		if init_w:
+			for critic, critic_target in zip(self.critics, self.critics_target):
+				critic.apply(utils.init_weights)
+				utils.hard_update(critic_target, critic)
+				if use_gpu:
+					critic.cuda();
+					critic_target.cuda();
+		self.critic_optims = [Adam(critic.parameters(), critic_lr) for critic in self.critics]
 
 
 		self.loss = nn.MSELoss()
 
-		if use_gpu:
-			self.policy_target.cuda(); self.critic_target.cuda(); self.policy.cuda(); self.critic.cuda()
+
 		self.num_critic_updates = 0
 
 		#Statistics Tracker
@@ -70,7 +78,7 @@ class MultiTD3(object):
 				next_action_batch = torch.clamp(next_action_batch, -1, 1)
 
 				#Compute Q-val and value of next state masking by done
-				q1, q2 = self.critic_target.forward(next_state_batch, next_action_batch)
+				q1, q2 = self.critics_target[agent_id].forward(next_state_batch, next_action_batch)
 				q1 = (1 - done_batch) * q1
 				q2 = (1 - done_batch) * q2
 
@@ -83,8 +91,8 @@ class MultiTD3(object):
 
 
 
-			self.critic_optim.zero_grad()
-			current_q1, current_q2 = self.critic.forward((state_batch), (action_batch))
+			self.critic_optims[agent_id].zero_grad()
+			current_q1, current_q2 = self.critics[agent_id].forward((state_batch), (action_batch))
 			utils.compute_stats(current_q1, self.q)
 
 			dt = self.loss(current_q1, target_q)
@@ -93,7 +101,7 @@ class MultiTD3(object):
 			utils.compute_stats(dt, self.q_loss)
 			dt.backward()
 
-			self.critic_optim.step()
+			self.critic_optims[agent_id].step()
 			self.num_critic_updates += 1
 
 
@@ -101,7 +109,7 @@ class MultiTD3(object):
 			if self.num_critic_updates % kwargs['policy_ups_freq'] == 0:
 
 				actor_actions = self.policy.clean_action(state_batch, agent_id)
-				Q1, Q2 = self.critic.forward(state_batch, actor_actions)
+				Q1, Q2 = self.critics[agent_id].forward(state_batch, actor_actions)
 
 				# if self.args.use_advantage: policy_loss = -(Q1 - val)
 				policy_loss = -Q1
@@ -118,7 +126,7 @@ class MultiTD3(object):
 
 
 			if self.num_critic_updates % kwargs['policy_ups_freq'] == 0: utils.soft_update(self.policy_target, self.policy, self.tau)
-			utils.soft_update(self.critic_target, self.critic, self.tau)
+			utils.soft_update(self.critics_target[agent_id], self.critics[agent_id], self.tau)
 
 			self.total_update += 1
 			if self.agent_id == 0:

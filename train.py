@@ -11,16 +11,16 @@ import threading, sys
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-popsize', type=int, help='#Evo Population size', default=0)
-parser.add_argument('-rollsize', type=int, help='#Rollout size for agents', default=0)
+parser.add_argument('-popsize', type=int, help='#Evo Population size', default=10)
+parser.add_argument('-rollsize', type=int, help='#Rollout size for agents', default=50)
 parser.add_argument('-env', type=str, help='Env to test on?', default='rover_tight')
-parser.add_argument('-config', type=str, help='World Setting?', default='')
+parser.add_argument('-config', type=str, help='World Setting?', default='6_3')
 parser.add_argument('-matd3', type=str2bool, help='Use_MATD3?', default=False)
 parser.add_argument('-maddpg', type=str2bool, help='Use_MADDPG?', default=False)
-parser.add_argument('-reward', type=str, help='Reward Structure? 1. mixed 2. global', default='')
+parser.add_argument('-reward', type=str, help='Reward Structure? 1. mixed 2. global', default='global')
 parser.add_argument('-frames', type=float, help='Frames in millions?', default=2)
 parser.add_argument('-seed', type=int, help='#Seed', default=2019)
-parser.add_argument('-savetag', help='Saved tag', default='')
+parser.add_argument('-savetag', help='Saved tag', default='agent_critic_')
 parser.add_argument('-use_gpu', type=str2bool, help='USE_GPU?', default=True)
 RANDOM_BASELINE = False
 
