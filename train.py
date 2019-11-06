@@ -1,53 +1,96 @@
-from core.agent import Agent, TestAgent
+
 from core.mod_utils import pprint, str2bool
 import numpy as np, os, time, torch
-from core import mod_utils as utils
-from core.runner import rollout_worker
-from torch.multiprocessing import Process, Pipe
 import core.mod_utils as mod
 import argparse
-import random
-import threading, sys
+from core.models import MultiHeadActor, sample_weight_uniform, sample_weight_normal
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-popsize', type=int, help='#Evo Population size', default=0)
 parser.add_argument('-rollsize', type=int, help='#Rollout size for agents', default=0)
 parser.add_argument('-env', type=str, help='Env to test on?', default='rover_tight')
-parser.add_argument('-config', type=str, help='World Setting?', default='')
+parser.add_argument('-config', type=str, help='World Setting?', default='6_3')
 parser.add_argument('-matd3', type=str2bool, help='Use_MATD3?', default=False)
 parser.add_argument('-maddpg', type=str2bool, help='Use_MADDPG?', default=False)
-parser.add_argument('-reward', type=str, help='Reward Structure? 1. mixed 2. global', default='')
+parser.add_argument('-reward', type=str, help='Reward Structure? 1. mixed 2. global', default='global')
 parser.add_argument('-frames', type=float, help='Frames in millions?', default=2)
 parser.add_argument('-seed', type=int, help='#Seed', default=2019)
 parser.add_argument('-savetag', help='Saved tag', default='')
-parser.add_argument('-use_gpu', type=str2bool, help='USE_GPU?', default=True)
+parser.add_argument('-dist', type=str, help='DIST?', default='')
 RANDOM_BASELINE = False
 
 
+from core import mod_utils as utils
+import numpy as np, random, sys
+from envs.env_wrapper import RoverDomainPython
+
+
+#Rollout evaluate an agent in a complete game
+def evaluate(env, model, NUM_EVALS):
+	"""Rollout Worker runs a simulation in the environment to generate experiences and fitness values
+
+		Parameters:
+			args (object): Parameter class
+			id (int): Specific Id unique to each worker spun
+			task_pipe (pipe): Receiver end of the task pipe used to receive signal to start on a task
+			result_pipe (pipe): Sender end of the pipe used to report back results
+			data_bucket (shared list object): A shared list object managed by a manager that is used to store experience tuples
+			models_bucket (shared list object): A shared list object managed by a manager used to store all the models (actors)
+			store_transition (bool): Log experiences to exp_list?
+			random_baseline (bool): Test with random action for baseline purpose?
+
+		Returns:
+			None
+	"""
+
+	fitness = [None for _ in range(NUM_EVALS)]; frame=0
+	joint_state = env.reset()
+	joint_state = utils.to_tensor(np.array(joint_state))
+
+	while True: #unless done
+
+		joint_action = [model.clean_action(joint_state[i, :], head=i).detach().numpy() for i in range(args.config.num_agents)]
+
+		#JOINT ACTION [agent_id, universe_id, action]
+		#Bound Action
+		joint_action = np.array(joint_action).clip(-1.0, 1.0)
+		next_state, reward, done, global_reward = env.step(joint_action)  # Simulate one step in environment
+		#State --> [agent_id, universe_id, obs]
+		#reward --> [agent_id, universe_id]
+		#done --> [universe_id]
+		#info --> [universe_id]
+
+		next_state = utils.to_tensor(np.array(next_state))
+
+		#Grab global reward as fitnesses
+		for i, grew in enumerate(global_reward):
+			if grew != None:
+				fitness[i] = grew
+
+
+		joint_state = next_state
+		frame+=NUM_EVALS
+
+		#DONE FLAG IS Received
+		if sum(done)==len(done):
+			break
+
+	return sum(fitness)/len(fitness), frame
+
 
 class ConfigSettings:
-	def __init__(self, popnsize):
+	def __init__(self):
 
 		self.env_choice = vars(parser.parse_args())['env']
 		config = vars(parser.parse_args())['config']
 		self.config = config
 		self.reward_scheme = vars(parser.parse_args())['reward']
-		#Global subsumes local or vice-versa?
-		####################### NIPS EXPERIMENTS SETUP #################
-		if popnsize > 0: #######MERL or EA
-			self.is_lsg = False
-			self.is_proxim_rew = True
 
-		else: #######TD3 or MADDPG
-			if self.reward_scheme == 'mixed':
-				self.is_lsg = True
-				self.is_proxim_rew = True
-			elif self.reward_scheme == 'global':
-				self.is_lsg = True
-				self.is_proxim_rew = False
-			else:
-				sys.exit('Incorrect Reward Scheme')
+		self.is_lsg = False
+		self.is_proxim_rew = True
+
+
 
 
 		# ROVER DOMAIN
@@ -166,56 +209,27 @@ class Parameters:
 	def __init__(self):
 
 		# Transitive Algo Params
-		self.popn_size = vars(parser.parse_args())['popsize']
-		self.rollout_size = vars(parser.parse_args())['rollsize']
-		self.frames_bound = int(vars(parser.parse_args())['frames'] * 1000000)
-		self.use_gpu = vars(parser.parse_args())['use_gpu']
+		self.dist = vars(parser.parse_args())['dist']
 		self.seed = vars(parser.parse_args())['seed']
-		self.is_matd3 = vars(parser.parse_args())['matd3']
-		self.is_maddpg = vars(parser.parse_args())['maddpg']
-		assert  self.is_maddpg * self.is_matd3 == 0 #Cannot be both True
+
 
 		# Env domain
-		self.config = ConfigSettings(self.popn_size)
+		self.config = ConfigSettings()
+		self.hidden_size = 100
 
 		# Fairly Stable Algo params
-		self.hidden_size = 100
-		self.actor_lr = 5e-5
-		self.critic_lr = 1e-5
-		self.tau = 1e-5
-		self.init_w = True
-		self.gradperstep = 1.0
-		self.gamma = 0.5 if self.popn_size > 0 else 0.97
-		self.batch_size = 512
-		self.buffer_size = 100000
-		self.reward_scaling = 10.0
 
-
-		# NeuroEvolution stuff
-		self.crossover_prob = 0.1
-		self.mutation_prob = 0.9
-		self.extinction_prob = 0.005  # Probability of extinction event
-		self.extinction_magnitude = 0.5  # Probabilty of extinction for each genome, given an extinction event
-		self.weight_clamp = 1000000
-		self.mut_distribution = 1  # 1-Gaussian, 2-Laplace, 3-Uniform
-		self.num_elites = 4
 
 		# Dependents
 		self.state_dim = int(720 / self.config.angle_res) + 3
 		self.action_dim = 2
-		self.num_test = 10
-		self.test_gap = 5
+
 
 		# Save Filenames
 		self.savetag = vars(parser.parse_args())['savetag'] + \
-		               'pop' + str(self.popn_size) + \
-		               '_roll' + str(self.rollout_size) + \
+		               '_dist' + str(self.dist) + \
 		               '_env' + str(self.config.env_choice) + '_' + str(self.config.config) + \
-					   '_seed' + str(self.seed) + \
-						'-reward' + str(self.config.reward_scheme) +\
-		               ('_matd3' if self.is_matd3 else '') + \
-		               ('_maddpg' if self.is_maddpg else '')
-
+					   '_seed' + str(self.seed) + '_rwg'
 
 		self.save_foldername = 'R_MERL/'
 		if not os.path.exists(self.save_foldername): os.makedirs(self.save_foldername)
@@ -233,209 +247,52 @@ class Parameters:
 		self.best_fname = 'best_' + self.savetag
 
 
-class MERL:
-	"""Policy Gradient Algorithm main object which carries out off-policy learning using policy gradient
-	   Encodes all functionalities for 1. TD3 2. DDPG 3.Trust-region TD3/DDPG 4. Advantage TD3/DDPG
 
-			Parameters:
-				args (int): Parameter class with all the parameters
-
-			"""
-
-	def __init__(self, args):
-		self.args = args
-
-		######### Initialize the Multiagent Team of agents ########
-		self.agents = [Agent(self.args, id)]
-		self.test_agent = TestAgent(self.args, 991)
-
-		###### Buffer and Model Bucket as references to the corresponding agent's attributes ####
-		self.buffer_bucket = [buffer.tuples for buffer in self.agents[0].buffer]
-		self.popn_bucket = [ag.popn for ag in self.agents]
-		self.rollout_bucket = [ag.rollout_actor for ag in self.agents]
-		self.test_bucket = self.test_agent.rollout_actor
-
-		######### EVOLUTIONARY WORKERS ############
-		if self.args.popn_size > 0:
-			self.evo_task_pipes = [Pipe() for _ in range(args.popn_size)]
-			self.evo_result_pipes = [Pipe() for _ in range(args.popn_size)]
-			self.evo_workers = [Process(target=rollout_worker, args=(
-				self.args, i, 'evo', self.evo_task_pipes[i][1], self.evo_result_pipes[i][0],
-				self.buffer_bucket, self.popn_bucket, True, RANDOM_BASELINE)) for i in
-			                    range(args.popn_size)]
-			for worker in self.evo_workers: worker.start()
-
-		######### POLICY GRADIENT WORKERS ############
-		if self.args.rollout_size > 0:
-			self.pg_task_pipes = Pipe()
-			self.pg_result_pipes = Pipe()
-			self.pg_workers = [
-				Process(target=rollout_worker, args=(self.args, 0, 'pg', self.pg_task_pipes[1], self.pg_result_pipes[0],
-				                                     self.buffer_bucket, self.rollout_bucket,
-				                                     self.args.rollout_size > 0, RANDOM_BASELINE))]
-			for worker in self.pg_workers: worker.start()
-
-		######### TEST WORKERS ############
-		self.test_task_pipes = Pipe()
-		self.test_result_pipes = Pipe()
-		self.test_workers = [Process(target=rollout_worker,
-		                             args=(self.args, 0, 'test', self.test_task_pipes[1], self.test_result_pipes[0],
-		                                   None, self.test_bucket, False, RANDOM_BASELINE))]
-		for worker in self.test_workers: worker.start()
-
-		#### STATS AND TRACKING WHICH ROLLOUT IS DONE ######
-		self.best_score = -999;
-		self.total_frames = 0;
-		self.gen_frames = 0;
-		self.test_trace = []
-
-	def make_teams(self, num_agents, popn_size, num_evals):
-
-		temp_inds = []
-		for _ in range(num_evals): temp_inds += list(range(popn_size))
-
-		all_inds = [temp_inds[:] for _ in range(num_agents)]
-		# for _ in range(num_evals):
-		# 	for ag in range(num_agents):
-		# 		all_inds[ag] += list(range(popn_size))
-
-		for entry in all_inds: random.shuffle(entry)
-
-		teams = [[entry[i] for entry in all_inds] for i in range(popn_size * num_evals)]
-
-		return teams
-
-	def train(self, gen, test_tracker):
-		"""Main training loop to do rollouts and run policy gradients
-
-			Parameters:
-				gen (int): Current epoch of training
-
-			Returns:
-				None
-		"""
-
-		# Test Rollout
-		if gen % self.args.test_gap == 0:
-			self.test_agent.make_champ_team(self.agents)  # Sync the champ policies into the TestAgent
-			self.test_task_pipes[0].send("START")
-
-
-		########## START EVO ROLLOUT ##########
-		teams = [[i] for i in list(range(args.popn_size))]
-		if self.args.popn_size > 0:
-			for pipe, team in zip(self.evo_task_pipes, teams):
-				pipe[0].send(team)
-
-		########## START POLICY GRADIENT ROLLOUT ##########
-		if self.args.rollout_size > 0 and not RANDOM_BASELINE:
-			# Synch pg_actors to its corresponding rollout_bucket
-			for agent in self.agents: agent.update_rollout_actor()
-
-			# Start rollouts using the rollout actors
-			self.pg_task_pipes[0].send('START')  # Index 0 for the Rollout bucket
-
-			############ POLICY GRADIENT UPDATES #########
-			# Spin up threads for each agent
-			threads = [threading.Thread(target=agent.update_parameters, args=()) for agent in self.agents]
-
-			# Start threads
-			for thread in threads: thread.start()
-
-			# Join threads
-			for thread in threads: thread.join()
-
-		all_fits = []
-		####### JOIN EVO ROLLOUTS ########
-		if self.args.popn_size > 0:
-			for pipe in self.evo_result_pipes:
-				entry = pipe[1].recv()
-				team = entry[0];
-				fitness = entry[1][0];
-				frames = entry[2]
-
-				for agent_id, popn_id in enumerate(team): self.agents[agent_id].fitnesses[popn_id].append(
-					utils.list_mean(fitness))  ##Assign
-				all_fits.append(utils.list_mean(fitness))
-				self.total_frames += frames
-
-		####### JOIN PG ROLLOUTS ########
-		pg_fits = []
-		if self.args.rollout_size > 0 and not RANDOM_BASELINE:
-			entry = self.pg_result_pipes[1].recv()
-			pg_fits = entry[1][0]
-			self.total_frames += entry[2]
-
-		####### JOIN TEST ROLLOUTS ########
-		test_fits = []
-		if gen % self.args.test_gap == 0:
-			entry = self.test_result_pipes[1].recv()
-			test_fits = entry[1][0]
-			test_tracker.update([mod.list_mean(test_fits)], self.total_frames)
-			self.test_trace.append(mod.list_mean(test_fits))
-
-		# Evolution Step
-		for agent in self.agents:
-			agent.evolve()
-
-		#Save models periodically
-		if gen % 10 == 0:
-			for id, test_actor in enumerate(self.test_agent.rollout_actor):
-				torch.save(test_actor.state_dict(), self.args.model_save + str(id) + '_' + self.args.actor_fname)
-			print("Models Saved")
-
-		return all_fits, pg_fits, test_fits
 
 
 if __name__ == "__main__":
 	args = Parameters()  # Create the Parameters class
-	test_tracker = utils.Tracker(args.metric_save, [args.log_fname], '.csv')  # Initiate tracker
+	train_env = RoverDomainPython(args, 10)
+	test_env = RoverDomainPython(args, 100)
+
+
+	#test_tracker = utils.Tracker(args.metric_save, [args.log_fname], '.csv')  # Initiate tracker
 	torch.manual_seed(args.seed);
 	np.random.seed(args.seed);
 	random.seed(args.seed)  # Seeds
 
-	# INITIALIZE THE MAIN AGENT CLASS
-	ai = MERL(args)
-	print('Running ', args.config.env_choice, 'with config ', args.config.config, ' State_dim:', args.state_dim,
-	      'Action_dim', args.action_dim)
-	time_start = time.time()
+	total_frames = 0; all_scores = [-1.0]; all_test = [-1.0]
+	model = MultiHeadActor(args.state_dim, args.action_dim, args.hidden_size, args.config.num_agents)
 
+
+	print_threshold = 1000000
 	###### TRAINING LOOP ########
-	for gen in range(1, 10000000000):  # RUN VIRTUALLY FOREVER
+	while True:
 
-		# ONE EPOCH OF TRAINING
-		popn_fits, pg_fits, test_fits = ai.train(gen, test_tracker)
+		if args.dist == 'uniform':
+			model.apply(sample_weight_uniform)
+		elif args.dist == 'normal':
+			model.apply(sample_weight_normal)
+		else:
+			Exception('Unknown distribution')
+
+		score, frame = evaluate(train_env, model, 10)
+		total_frames += frame
+
+		if score > max(all_scores):
+			test_score, _ = evaluate(test_env, model, 100)
+			all_test.append(test_score)
+
+		all_scores.append(score)
 
 		# PRINT PROGRESS
-		print('Ep:/Frames', gen, '/', ai.total_frames, 'Popn stat:', mod.list_stat(popn_fits), 'PG_stat:',
-		      mod.list_stat(pg_fits),
-		      'Test_trace:', [pprint(i) for i in ai.test_trace[-5:]], 'FPS:',
-		      pprint(ai.total_frames / (time.time() - time_start)))
+		if total_frames > print_threshold:
+			print('Frames', total_frames, 'Best_Train', max(all_scores), 'Best_Test', max(all_test))
+			print_threshold += 1000000
 
-		if gen % 5 == 0:
-			print()
-			print('Test_stat:', mod.list_stat(test_fits), 'SAVETAG:  ', args.savetag)
-			print('Weight Stats: min/max/average', pprint(ai.test_bucket[0].get_norm_stats()))
-			print('Buffer Lens:', [ag.buffer[0].__len__() for ag in ai.agents])
-			print()
 
-		if gen % 10 == 0 and args.rollout_size > 0:
-			print()
-			print('Q', pprint(ai.agents[0].algo.q))
-			print('Q_loss', pprint(ai.agents[0].algo.q_loss))
-			print('Policy', pprint(ai.agents[0].algo.policy_loss))
-			print('########################################################################')
 
-		if ai.total_frames > args.frames_bound:
+		if total_frames > 100000000:
 			break
 
-	###Kill all processes
-	try: ai.pg_task_pipes[0].send('TERMINATE')
-	except: None
-	try: ai.test_task_pipes[0].send('TERMINATE')
-	except: None
-	try:
-		for p in ai.evo_task_pipes: p[0].send('TERMINATE')
-	except: None
-	print('Finished Running ', args.savetag)
-	exit(0)
+
