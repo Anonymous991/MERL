@@ -26,7 +26,7 @@ parser.add_argument('--filter_c', type=int, help='Prob multiplier for evo experi
 parser.add_argument('--evals', type=int, help='#Evals to compute a fitness', default=1)
 parser.add_argument('--seed', type=int, help='#Seed', default=2018)
 parser.add_argument('--algo', type=str, help='SAC Vs. TD3?', default='TD3')
-parser.add_argument('--savetag', help='Saved tag', default='')
+parser.add_argument('--savetag', help='Saved tag', default='new_tag_')
 parser.add_argument('--gradperstep', type=float, help='gradient steps per frame', default=1.0)
 parser.add_argument('--pr', type=float, help='Prioritization?', default=0.0)
 parser.add_argument('--gpu_id', type=int, help='USE_GPU?', default=0)
@@ -135,8 +135,8 @@ class Parameters:
 		self.action_dim = 2
 
 		if self.config.config == 'simple_tag' or self.config.config == 'hard_tag':
-			self.pred_state_dim = 16
-			self.prey_state_dim = 14
+			self.pred_state_dim = 26
+			self.prey_state_dim = 24
 
 		elif self.config.config == 'simple_adversary':
 			self.pred_state_dim = 10
@@ -195,7 +195,7 @@ class MERL:
 
 		###### Buffer and Model Bucket as references to the corresponding agent's attributes ####
 		self.predator_buffer_bucket = [buffer.tuples for buffer in self.agents.buffer]
-		self.prey_buffer_bucket = [self.prey_agent.buffer[0].tuples]
+		self.prey_buffer_bucket = [buffer.tuples for buffer in self.prey_agent.buffer]
 
 		self.popn_bucket = self.agents.popn
 		self.predator_rollout_bucket = self.agents.rollout_actor

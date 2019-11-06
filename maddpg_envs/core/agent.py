@@ -194,62 +194,49 @@ class PreyAgent:
         self.manager = Manager()
 
         #### INITIALIZE PG ALGO #####
-        self.algo = MultiTD3(id, 'DDPG', args.prey_state_dim, args.action_dim, args.hidden_size, args.actor_lr,
+        self.algo = [MultiTD3(id, 'DDPG', args.prey_state_dim, args.action_dim, args.hidden_size, args.actor_lr,
                                 args.critic_lr, args.gamma, args.tau, args.savetag, args.aux_save, args.actualize,
-                                args.use_gpu, 1, args.init_w)
+                                args.use_gpu, 1, args.init_w) for _ in range(args.config.num_agents)]
         self.rollout_actor = self.manager.list()
-        self.rollout_actor.append(MultiHeadActor(args.prey_state_dim, args.action_dim, args.hidden_size, 1))
+        for _ in range(args.config.num_agents):
+            self.rollout_actor.append(MultiHeadActor(args.prey_state_dim, args.action_dim, args.hidden_size, 1))
 
 
         #Initalize buffer
-        self.buffer = [Buffer(args.buffer_size, buffer_gpu=False, filter_c=args.filter_c)]
+        self.buffer = [Buffer(args.buffer_size, buffer_gpu=False, filter_c=args.filter_c) for _ in range(args.config.num_agents)]
 
 
     def update_parameters(self):
 
         td3args = {'policy_noise': 0.2, 'policy_noise_clip': 0.5, 'policy_ups_freq': 2, 'action_low': -1.0, 'action_high': 1.0}
 
-        if self.args.ps == 'trunk':
+        for agent_id, buffer in enumerate(self.buffer):
 
-            for agent_id, buffer in enumerate(self.buffer):
-
-                buffer.referesh()
-                if buffer.__len__() < 10 * self.args.batch_size:
-                    buffer.pg_frames = 0
-                    #return  ###BURN_IN_PERIOD
-                buffer.tensorify()
-
-                for _ in range(int(self.args.gradperstep * buffer.pg_frames)):
-                    s, ns, a, r, done = buffer.sample(self.args.batch_size,
-                                                                          pr_rew=self.args.priority_rate,
-                                                                          pr_global=self.args.priority_rate)
-                    r*=self.args.reward_scaling
-                    if self.args.use_gpu:
-                        s = s.cuda(); ns = ns.cuda(); a = a.cuda(); r = r.cuda(); done = done.cuda()
-                    self.algo.update_parameters(s, ns, a, r, done, agent_id, 1, **td3args)
+            buffer.referesh()
+            if buffer.__len__() < 10 * self.args.batch_size:
                 buffer.pg_frames = 0
+                #return  ###BURN_IN_PERIOD
+            buffer.tensorify()
 
-
-        else:
-            self.buffer.referesh()
-            #if self.buffer.__len__() < 10 * self.args.batch_size: return  ###BURN_IN_PERIOD
-            self.buffer.tensorify()
-
-            for _ in range(int(self.args.gradperstep * self.buffer.pg_frames)):
-                s, ns, a, r, done, global_reward = self.buffer.sample(self.args.batch_size, pr_rew=self.args.priority_rate, pr_global=self.args.priority_rate)
-                r *= self.args.reward_scaling
+            for _ in range(int(self.args.gradperstep * buffer.pg_frames)):
+                s, ns, a, r, done = buffer.sample(self.args.batch_size,
+                                                                      pr_rew=self.args.priority_rate,
+                                                                      pr_global=self.args.priority_rate)
+                r*=self.args.reward_scaling
                 if self.args.use_gpu:
-                    s = s.cuda(); ns = ns.cuda(); a = a.cuda(); r = r.cuda(); done = done.cuda(); global_reward = global_reward.cuda()
-                self.algo.update_parameters(s, ns, a, r, done, global_reward, 1, **td3args)
+                    s = s.cuda(); ns = ns.cuda(); a = a.cuda(); r = r.cuda(); done = done.cuda()
+                self.algo[agent_id].update_parameters(s, ns, a, r, done, agent_id, 1, **td3args)
+            buffer.pg_frames = 0
 
-            self.buffer.pg_frames = 0 #Reset new frame counter to 0
+
+
 
 
     def update_rollout_actor(self):
-        for actor in self.rollout_actor:
-            self.algo.policy.cpu()
-            mod.hard_update(actor, self.algo.policy)
-            if self.args.use_gpu: self.algo.policy.cuda()
+        for agent_id, actor in enumerate(self.rollout_actor):
+            self.algo[agent_id].policy.cpu()
+            mod.hard_update(actor, self.algo[agent_id].policy)
+            if self.args.use_gpu: self.algo[agent_id].policy.cuda()
 
 class TestAgent:
     """Learner object encapsulating a local learner
@@ -277,7 +264,8 @@ class TestAgent:
         self.prey = self.manager.list()
 
         self.predator.append(MultiHeadActor(args.pred_state_dim, args.action_dim, args.hidden_size, args.config.num_agents))
-        self.prey.append(MultiHeadActor(args.prey_state_dim, args.action_dim, args.hidden_size, 1))
+        for i in range(3):
+            self.prey.append(MultiHeadActor(args.prey_state_dim, args.action_dim, args.hidden_size, 1))
 
 
 
@@ -291,5 +279,6 @@ class TestAgent:
 
         #PREY
         prey.update_rollout_actor()
-        mod.hard_update(self.prey[0], prey.rollout_actor[0])
+        for i in range(3):
+            mod.hard_update(self.prey[i], prey.rollout_actor[i])
 

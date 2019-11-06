@@ -47,7 +47,7 @@ class SimpleTag:
 		predator_obs = []; prey_obs = []
 		for env in self.universe:
 			obs = env.reset()
-			prey_obs.append(obs[3:4])
+			prey_obs.append(obs[3:6])
 			predator_obs.append(obs[0:3])
 
 		prey_obs = np.stack(prey_obs, axis=1)
@@ -78,10 +78,10 @@ class SimpleTag:
 			#If this particular env instance in universe is already done:
 			next_state, reward, _, _ = env.step(joint_action[:,universe_id,:])
 			done = self.i > self.T
-			prey_obs.append(next_state[3:4])
+			prey_obs.append(next_state[3:6])
 			pred_obs.append(next_state[0:3])
 			pred_reward.append(reward[0:3])
-			prey_reward.append(reward[3:4])
+			prey_reward.append(reward[3:6])
 			self.global_reward[universe_id][0] = env.world.num_collisions
 			self.global_reward[universe_id][1] += sum(prey_reward[-1]) / (self.T)
 

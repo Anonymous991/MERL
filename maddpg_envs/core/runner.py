@@ -61,7 +61,7 @@ def rollout_worker(args, id, type, task_pipe, result_pipe, predator_data_bucket,
         fitness = [None for _ in range(NUM_EVALS)]; frame=0
         prey_fitness = [None for _ in range(NUM_EVALS)]
         predator_state, prey_state = env.reset()
-        prey_rollout_trajectory = []
+        prey_rollout_trajectory = [[] for _ in range(3)]
         predator_rollout_trajectory = [[] for _ in range(3)]
 
         prey_state = utils.to_tensor(np.array(prey_state))
@@ -69,11 +69,12 @@ def rollout_worker(args, id, type, task_pipe, result_pipe, predator_data_bucket,
 
         while True: #unless done
             if type == 'pg':
-                prey_action = [prey_bucket[0].noisy_action(prey_state[i,:], head=i).detach().numpy() for i in range(len(prey_state))]
+                prey_action = [prey_bucket[i].noisy_action(prey_state[i,:], head=0).detach().numpy() for i in range(len(prey_state))]
                 predator_action = [team[i].noisy_action(predator_state[i,:], head=i).detach().numpy() for i in range(len(predator_state))]
             else:
-                prey_action = [prey_bucket[0].clean_action(prey_state[i, :], head=i).detach().numpy() for i in range(len(prey_state))]
+                prey_action = [prey_bucket[i].clean_action(prey_state[i, :], head=0).detach().numpy() for i in range(len(prey_state))]
                 predator_action = [team[i].clean_action(predator_state[i, :], head=i).detach().numpy() for i in range(len(predator_state))]
+
 
             #JOINT ACTION [agent_id, universe_id, action]
 
@@ -129,16 +130,17 @@ def rollout_worker(args, id, type, task_pipe, result_pipe, predator_data_bucket,
                                  type])
 
             #PREY
-            for universe_id in range(NUM_EVALS):
-                if not done:
-                    prey_rollout_trajectory.append(
-                        [np.expand_dims(utils.to_numpy(prey_state)[0, universe_id, :], 0),
-                         np.expand_dims(utils.to_numpy(next_prey_state)[0, universe_id, :], 0),
-                         np.expand_dims(prey_action[0, universe_id, :], 0),  # [batch, agent_id, :]
-                         np.array([prey_reward[:, universe_id]], dtype="float32"),
-                         np.expand_dims(np.array([done], dtype="float32"), 0),
-                         universe_id,
-                         type])
+            for agent_id in range(args.config.num_agents):
+                for universe_id in range(NUM_EVALS):
+                    if not done:
+                        prey_rollout_trajectory[agent_id].append(
+                            [np.expand_dims(utils.to_numpy(prey_state)[agent_id, universe_id, :], 0),
+                             np.expand_dims(utils.to_numpy(next_prey_state)[agent_id, universe_id, :], 0),
+                             np.expand_dims(prey_action[agent_id, universe_id, :], 0),  # [batch, agent_id, :]
+                             np.array([prey_reward[agent_id, universe_id]], dtype="float32"),
+                             np.expand_dims(np.array([done], dtype="float32"), 0),
+                             universe_id,
+                             type])
 
 
             predator_state = next_pred_state
@@ -157,8 +159,8 @@ def rollout_worker(args, id, type, task_pipe, result_pipe, predator_data_bucket,
                             buffer.append(entry)
 
                     #PREY
-                    for buffer in prey_data_bucket:
-                        for entry in prey_rollout_trajectory:
+                    for agent_id, buffer in enumerate(prey_data_bucket):
+                        for entry in prey_rollout_trajectory[agent_id]:
                             temp_global_reward = 0.0
                             entry[5] = np.expand_dims(np.array([temp_global_reward], dtype="float32"), 0)
                             buffer.append(entry)
