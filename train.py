@@ -3,31 +3,36 @@ from core.mod_utils import pprint, str2bool
 import numpy as np, os, time, torch
 import core.mod_utils as mod
 import argparse
-from core.models import MultiHeadActor, sample_weight_uniform, sample_weight_normal
-
-
-parser = argparse.ArgumentParser()
-parser.add_argument('-popsize', type=int, help='#Evo Population size', default=0)
-parser.add_argument('-rollsize', type=int, help='#Rollout size for agents', default=0)
-parser.add_argument('-env', type=str, help='Env to test on?', default='rover_tight')
-parser.add_argument('-config', type=str, help='World Setting?', default='6_3')
-parser.add_argument('-matd3', type=str2bool, help='Use_MATD3?', default=False)
-parser.add_argument('-maddpg', type=str2bool, help='Use_MADDPG?', default=False)
-parser.add_argument('-reward', type=str, help='Reward Structure? 1. mixed 2. global', default='global')
-parser.add_argument('-frames', type=float, help='Frames in millions?', default=2)
-parser.add_argument('-seed', type=int, help='#Seed', default=2019)
-parser.add_argument('-savetag', help='Saved tag', default='')
-parser.add_argument('-dist', type=str, help='DIST?', default='')
-RANDOM_BASELINE = False
-
-
+from core.models import MultiHeadActor
 from core import mod_utils as utils
 import numpy as np, random, sys
 from envs.env_wrapper import RoverDomainPython
+import copy
+from functools import partial
+
+from pytorch_es import EvolutionModule
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument('-popsize', type=int, help='#Evo Population size', default=100)
+parser.add_argument('-rollsize', type=int, help='#Rollout size for agents', default=0)
+parser.add_argument('-env', type=str, help='Env to test on?', default='rover_tight')
+parser.add_argument('-config', type=str, help='World Setting?', default='6_3')
+parser.add_argument('-reward', type=str, help='Reward Structure? 1. mixed 2. global', default='global')
+parser.add_argument('-frames', type=float, help='Frames in millions?', default=2)
+parser.add_argument('-seed', type=int, help='#Seed', default=2019)
+parser.add_argument('-savetag', help='Saved tag', default='ES_')
+
+parser.add_argument('-sigma', type=float, help='Saved tag', default=0.1)
+parser.add_argument('-lr', type=float, help='Saved tag', default=1e-3)
+RANDOM_BASELINE = False
+
+
+
 
 
 #Rollout evaluate an agent in a complete game
-def evaluate(env, model, NUM_EVALS):
+def evaluate(weights, args, NUM_EVALS=10, render=False):
 	"""Rollout Worker runs a simulation in the environment to generate experiences and fitness values
 
 		Parameters:
@@ -43,6 +48,16 @@ def evaluate(env, model, NUM_EVALS):
 		Returns:
 			None
 	"""
+	env = RoverDomainPython(args, NUM_EVALS)
+	model = MultiHeadActor(args.state_dim, args.action_dim, args.hidden_size, args.config.num_agents)
+
+	for i, param in enumerate(model.parameters()):
+		try:
+			param.data = weights[i]
+		except:
+			param.data = weights[i].data
+
+
 
 	fitness = [None for _ in range(NUM_EVALS)]; frame=0
 	joint_state = env.reset()
@@ -76,7 +91,7 @@ def evaluate(env, model, NUM_EVALS):
 		if sum(done)==len(done):
 			break
 
-	return sum(fitness)/len(fitness), frame
+	return sum(fitness)/len(fitness)
 
 
 class ConfigSettings:
@@ -209,8 +224,10 @@ class Parameters:
 	def __init__(self):
 
 		# Transitive Algo Params
-		self.dist = vars(parser.parse_args())['dist']
+		self.popsize = vars(parser.parse_args())['popsize']
 		self.seed = vars(parser.parse_args())['seed']
+		self.sigma = vars(parser.parse_args())['sigma']
+		self.lr = vars(parser.parse_args())['lr']
 
 
 		# Env domain
@@ -227,9 +244,11 @@ class Parameters:
 
 		# Save Filenames
 		self.savetag = vars(parser.parse_args())['savetag'] + \
-		               '_dist' + str(self.dist) + \
+		               '_popsize' + str(self.popsize) + \
 		               '_env' + str(self.config.env_choice) + '_' + str(self.config.config) + \
-					   '_seed' + str(self.seed) + '_rwg'
+					   '_sigma' + str(self.sigma) + \
+					   '_lr' + str(self.lr) + \
+					   '_seed' + str(self.seed)
 
 		self.save_foldername = 'R_MERL/'
 		if not os.path.exists(self.save_foldername): os.makedirs(self.save_foldername)
@@ -252,47 +271,41 @@ class Parameters:
 
 if __name__ == "__main__":
 	args = Parameters()  # Create the Parameters class
-	train_env = RoverDomainPython(args, 10)
-	test_env = RoverDomainPython(args, 100)
 
 
-	#test_tracker = utils.Tracker(args.metric_save, [args.log_fname], '.csv')  # Initiate tracker
+	test_tracker = utils.Tracker(args.metric_save, [args.log_fname], '.csv')  # Initiate tracker
 	torch.manual_seed(args.seed);
 	np.random.seed(args.seed);
 	random.seed(args.seed)  # Seeds
 
-	total_frames = 0; all_scores = [-1.0]; all_test = [-1.0]
 	model = MultiHeadActor(args.state_dim, args.action_dim, args.hidden_size, args.config.num_agents)
+	# EvolutionModule runs the population in a ThreadPool, so
+	# if you need to inject other arguments, you can do that
+	# using the partial tool
+	partial_func = partial(evaluate, args=args)
+	mother_parameters = list(model.parameters())
 
+	es = EvolutionModule(
+		mother_parameters, partial_func, population_size=args.popsize,
+		sigma=args.sigma, learning_rate=args.lr,
+		threadcount=100, cuda=False, render_test=False
+	)
 
-	print_threshold = 1000000
 	###### TRAINING LOOP ########
+	total_frames = 0
 	while True:
+		#Train
+		es.run(iterations=10, print_step = 100)
 
-		if args.dist == 'uniform':
-			model.apply(sample_weight_uniform)
-		elif args.dist == 'normal':
-			model.apply(sample_weight_normal)
-		else:
-			Exception('Unknown distribution')
+		total_frames += 10*args.popsize*args.config.ep_len*10
 
-		score, frame = evaluate(train_env, model, 10)
-		total_frames += frame
+		test_score = evaluate(es.weights, args, NUM_EVALS=50, render=False)
+		test_tracker.update([test_score], total_frames)
 
-		if score > max(all_scores):
-			test_score, _ = evaluate(test_env, model, 100)
-			all_test.append(test_score)
-
-		all_scores.append(score)
-
-		# PRINT PROGRESS
-		if total_frames > print_threshold:
-			print('Frames', total_frames, 'Best_Train', max(all_scores), 'Best_Test', max(all_test))
-			print_threshold += 1000000
+		print('Total_Frames', total_frames, 'Test_Score', test_score)
 
 
 
-		if total_frames > 100000000:
-			break
+
 
 
