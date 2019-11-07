@@ -12,13 +12,13 @@ import sys
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--popsize', type=int, help='#Evo Population size', default=10)
+parser.add_argument('--popsize', type=int, help='#Evo Population size', default=0)
 parser.add_argument('--rollsize', type=int, help='#Rollout size for agents', default=10)
 parser.add_argument('--env', type=str, help='Env to test on?', default='maddpg_envs')
 parser.add_argument('--config', type=str, help='World Setting?', default='simple_tag')
-parser.add_argument('--matd3', type=str2bool, help='Use_MATD3?', default=False)
+parser.add_argument('--matd3', type=str2bool, help='Use_MATD3?', default=True)
 parser.add_argument('--maddpg', type=str2bool, help='Use_MADDPG?', default=False)
-parser.add_argument('--reward', type=str, help='Reward Structure? 1. mixed 2. global', default='mixed')
+parser.add_argument('--reward', type=str, help='Reward Structure? 1. mixed 2. global', default='global')
 parser.add_argument('--frames', type=float, help='Frames in millions?', default=10)
 
 
@@ -26,7 +26,7 @@ parser.add_argument('--filter_c', type=int, help='Prob multiplier for evo experi
 parser.add_argument('--evals', type=int, help='#Evals to compute a fitness', default=1)
 parser.add_argument('--seed', type=int, help='#Seed', default=2018)
 parser.add_argument('--algo', type=str, help='SAC Vs. TD3?', default='TD3')
-parser.add_argument('--savetag', help='Saved tag', default='')
+parser.add_argument('--savetag', help='Saved tag', default='_matd3_global_')
 parser.add_argument('--gradperstep', type=float, help='gradient steps per frame', default=1.0)
 parser.add_argument('--pr', type=float, help='Prioritization?', default=0.0)
 parser.add_argument('--gpu_id', type=int, help='USE_GPU?', default=0)
