@@ -225,7 +225,8 @@ class PreyAgent:
                 r*=self.args.reward_scaling
                 if self.args.use_gpu:
                     s = s.cuda(); ns = ns.cuda(); a = a.cuda(); r = r.cuda(); done = done.cuda()
-                self.algo[agent_id].update_parameters(s, ns, a, r, done, agent_id, 1, **td3args)
+
+                self.algo[agent_id].update_parameters(s, ns, a, r, done, 0, 1, **td3args)
             buffer.pg_frames = 0
 
 

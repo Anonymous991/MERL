@@ -102,6 +102,9 @@ def rollout_worker(args, id, type, task_pipe, result_pipe, predator_data_bucket,
                     prey_fitness[i] = grew[1]
 
 
+
+
+
             #PREDATOR
             #Push experiences to memory
             if store_transitions:

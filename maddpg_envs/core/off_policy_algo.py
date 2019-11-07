@@ -280,6 +280,8 @@ class MultiTD3(object):
 					next_action_batch += policy_noise.cuda() if self.use_gpu else policy_noise
 					next_action_batch = torch.clamp(next_action_batch, -1, 1)
 
+				#print(agent_id, state_batch.shape, next_action_batch.shape, self.policy_target)
+
 				#Compute Q-val and value of next state masking by done
 				q1, q2 = self.critic_target.forward(next_state_batch, next_action_batch)
 				q1 = (1 - done_batch) * q1

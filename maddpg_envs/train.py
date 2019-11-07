@@ -91,7 +91,6 @@ class Parameters:
 		self.init_w = True
 		self.gradperstep = vars(parser.parse_args())['gradperstep']
 		self.gamma = 0.5 if self.popn_size > 0 else 0.97
-		self.batch_size = 512
 		self.buffer_size = 100000
 		self.filter_c = vars(parser.parse_args())['filter_c']
 		self.reward_scaling = 10.0
