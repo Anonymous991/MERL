@@ -82,8 +82,6 @@ class RoverDomainVel:
 			if self.rover_vel[rover_id][0] < 0: self.rover_vel[rover_id][0] = 0.0
 			elif self.rover_vel[rover_id][0] > 1: self.rover_vel[rover_id][0] = 1.0
 
-			if self.rover_vel[rover_id][1] < 0.5: self.rover_vel[rover_id][0] = 0.5
-			elif self.rover_vel[rover_id][1] > 0.5: self.rover_vel[rover_id][0] = 0.5
 
 
 			theta = self.rover_vel[rover_id][1] * 180 + self.rover_pos[rover_id][2]
